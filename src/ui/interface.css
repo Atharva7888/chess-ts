@@ -1,0 +1,21 @@
+#board {
+    display: grid;
+    grid-template-columns: repeat(8, 80px);
+    grid-template-rows: repeat(8, 80px);
+
+    width: 640px;
+    height: 640px;
+}
+
+.square {
+    width: 80px;
+    height: 80px;
+}
+
+.light {
+    background-color: #f0d9b5;
+}
+
+.dark {
+    background-color: #b58863;
+}
