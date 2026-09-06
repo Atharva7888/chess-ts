@@ -2,15 +2,18 @@
 import {
     type Position,
     Unit,
-    PawnMovement
+    PawnMovement,
+    type Colour,
 } from "../data/data";
 import {
     GameState
 } from "../data/gameState"
 import {
     OccupancyPackage,
+    PositionPackage,
     type PawnPackage
 } from "./engine"
+
 
 export class filter{
 
@@ -19,6 +22,7 @@ export class filter{
         this.gameState = gameState;
     }
     
+    ///filter 1
     public occupancyFilter(unit:Unit, positions:Position[]):OccupancyPackage{
 
         //create occupancy
@@ -44,6 +48,7 @@ export class filter{
         return occupancyPackage;
     }
 
+    //filter 2
     public blockFilter(_package:OccupancyPackage,vectors:Position[],unit:Unit):Position[]{
         let positions:Position[] = [];
         let northVectors: Position[] = [];
@@ -63,10 +68,15 @@ export class filter{
             return positions;
         }
 
+
         //sorting them vectors
         for (let i = 0; i < vectors.length; i++){
             const p:Position = vectors[i];
-            if (p.x === 0 && p.y > 0){northVectors.push(vectors[i]);}
+
+            const isKnightJump = (Math.abs(p.x) === 1 && Math.abs(p.y) === 2) ||
+            (Math.abs(p.x) === 2 && Math.abs(p.y) === 1);
+            if (isKnightJump){jumpVectors.push(vectors[i]);}
+            else if (p.x === 0 && p.y > 0){northVectors.push(vectors[i]);}
             else if (p.x===0 && p.y < 0){southVectors.push(vectors[i]);}
             else if (p.x > 0 && p.y===0){eastVectors.push(vectors[i]);}
             else if (p.x < 0 && p.y===0){westVectors.push(vectors[i]);}
@@ -74,12 +84,6 @@ export class filter{
             else if (p.x<0 && p.y<0){southWestVectors.push(vectors[i]);}
             else if (p.x<0 && p.y>0){northWestVectors.push(vectors[i]);}
             else if (p.x>0 && p.y<0){southEastVectors.push(vectors[i]);}
-            else if (
-                (p.x===-1 && p.y===-2) ||
-                (p.x===1 && p.y===2) ||
-                (p.x===2 && p.y===1) ||
-                (p.x===-2 && p.y===-1)
-            ){jumpVectors.push(vectors[i]);}
         }
         //sorting them from nearest to farthest positions from the origin
         let a: Position[][] = [
@@ -104,6 +108,7 @@ export class filter{
         return positions;
     }
 
+    //filter 3
     private blockCutter(a:Position[][], _package:OccupancyPackage):Position[][]{
         
         for (let i = 0; i < a.length; i++){//loop through arrays in a
@@ -139,6 +144,7 @@ export class filter{
         return a;
     }
 
+    //filter 4
     private jumpConditionalFilter(vectors:Position[], unit:Unit, 
         _package:OccupancyPackage):Position[]
     { 
@@ -168,103 +174,308 @@ export class filter{
         return positions;
     }
 
-    private PawnConditionalFilter(vectors:Position[], unit:Unit, _package:OccupancyPackage):Position[]{
-        let positions:Position[] = [];
-        const pawnPackage:PawnPackage = {
-            forward:[],
-            doubleForward:[],
-            captures:[]
+    //filter 5
+    private PawnConditionalFilter(vectors: Position[],unit: Unit,_package: OccupancyPackage):
+        Position[] {
+
+        const positions: Position[] = [];
+
+        const pawnPackage: PawnPackage = {
+            forward: [],
+            doubleForward: [],
+            captures: []
         };
 
-        for (let i = 0; i < vectors.length; i++){
-            const v = vectors[i];
-            if (unit.colour==='white'){
-                if (v.x===0 && v.y===1){pawnPackage.forward.push(v);}
-                else if (v.x===0 && v.y===2){pawnPackage.doubleForward.push(v);}
+        // classify vectors
+        for (const v of vectors) {
+            if (unit.colour === "white") {
+
+                if (v.x === 0 && v.y === 1) {pawnPackage.forward.push(v);}
+                else if (v.x === 0 && v.y === 2) {pawnPackage.doubleForward.push(v);}
                 else if (
-                    (v.x===-1 && v.y===1) ||
-                    (v.x===1 && v.y===1)
-                ){pawnPackage.captures.push(v);}
+                    (v.x === -1 && v.y === 1) ||
+                    (v.x === 1 && v.y === 1)
+                ) {pawnPackage.captures.push(v);}
+
             }
-            else if (unit.colour==='black') {
-                if (v.x===0 && v.y===-1){pawnPackage.forward.push(v);}
-                else if (v.x===0 && v.y===-2){pawnPackage.doubleForward.push(v);}
+            else {
+                if (v.x === 0 && v.y === -1) {pawnPackage.forward.push(v);}
+                else if (v.x === 0 && v.y === -2) {pawnPackage.doubleForward.push(v);}
                 else if (
-                    (v.x===-1 && v.y===-1) ||
-                    (v.x===1 && v.y===-1)
+                    (v.x === -1 && v.y === -1) ||
+                    (v.x === 1 && v.y === -1)
                 ) {pawnPackage.captures.push(v);}
             }
         }
 
-        if (pawnPackage.forward.length > 0){
-            // Check whether the one-step square is occupied
-            let occupiedAt1 = false;
-            for (let i=0; i < _package.friendly.length; i++) {
+        // forwad
+        if (pawnPackage.forward.length > 0) {
+            const v = pawnPackage.forward[0];
+
+            const forward: Position = {
+                x: unit.position.x + v.x,
+                y: unit.position.y + v.y
+            };
+
+            const occupied =
+                _package.friendly.some(p =>p.x === forward.x && p.y === forward.y) ||
+                _package.enemy.some(p =>p.x === forward.x && p.y === forward.y);
+
+            if (!occupied) {
+                positions.push(forward);
+
+                // double step
+                if (pawnPackage.doubleForward.length > 0) {
+
+                    const v2 = pawnPackage.doubleForward[0];
+
+                    const doubleForward: Position = {
+                        x: unit.position.x + v2.x,
+                        y: unit.position.y + v2.y
+                    };
+
+                    const occupiedAt2 =_package.friendly.some(p =>p.x === doubleForward.x &&
+                            p.y === doubleForward.y
+                        ) ||
+                        _package.enemy.some(p =>p.x === doubleForward.x &&p.y === doubleForward.y);
+
+                    if (!occupiedAt2) {
+                        positions.push(doubleForward);
+                    }
+                }
+            }
+        }
+
+        // capture
+        for (const v of pawnPackage.captures) {
+
+            const capture: Position = {
+                x: unit.position.x + v.x,
+                y: unit.position.y + v.y
+            };
+
+            const enemyExists = _package.enemy.some(p =>
+                p.x === capture.x &&
+                p.y === capture.y
+            );
+
+            if (enemyExists) {
+                positions.push(capture);
+            }
+        }
+
+        return positions;
+    }
+
+    //filter 6
+    public isKingCheck(turn:Colour, posPacks:PositionPackage[]):boolean{
+        const king = this.gameState.getUnitByPieceType("king", turn);
+        if (!king){throw new Error(`${turn} king not found`);}
+        for (let i = 0; i < posPacks.length; i++){
+            for (let j = 0; j < posPacks[i].positions.length; j++){
                 if (
-                    _package.friendly[i].x === pawnPackage.forward[0].x &&
-                    _package.friendly[i].y === pawnPackage.forward[0].y
+                    king.position.x === posPacks[i].positions[j].x &&
+                    king.position.y === posPacks[i].positions[j].y
+                ){return true;}
+            }
+        }
+
+        return false;
+    }
+
+    //filter 7
+    public whichPiecesThreateningKing(turn:Colour, posPacks:PositionPackage[]):PositionPackage[]{
+        let unitsThreateningKing:PositionPackage[] = [];
+        const king = this.gameState.getUnitByPieceType("king", turn);
+        if (!king){throw new Error(`${turn} king not found`);}
+
+        for (let i = 0; i < posPacks.length; i++){
+            for (let j = 0; j < posPacks[i].positions.length; j++){
+                if (
+                    king.position.x === posPacks[i].positions[j].x &&
+                    king.position.y === posPacks[i].positions[j].y
+                )
+                {unitsThreateningKing.push(posPacks[i]); break;}
+            }
+        }
+
+        return unitsThreateningKing;
+    }
+
+    //filter 8
+    public whichPiecesThreateningPosition(position: Position,posPacks: PositionPackage[]): PositionPackage[] {
+
+        const unitsThreateningPosition: PositionPackage[] = [];
+
+        for (let i = 0; i < posPacks.length; i++) {
+
+            for (let j = 0; j < posPacks[i].positions.length; j++) {
+
+                if (
+                    position.x === posPacks[i].positions[j].x &&
+                    position.y === posPacks[i].positions[j].y
                 ) {
-                    occupiedAt1 = true;
+                    unitsThreateningPosition.push(posPacks[i]);
                     break;
                 }
             }
-            if (!occupiedAt1) {
-                for (let i = 0; i < _package.enemy.length; i++) {
-                    if (
-                        _package.enemy[i].x === pawnPackage.forward[0].x &&
-                        _package.enemy[i].y === pawnPackage.forward[0].y
-                    ) {
-                        occupiedAt1 = true;
-                        break;
-                    }
-                }
-            }
-            if (!occupiedAt1) {
-                positions.push(pawnPackage.forward[0]);
-            }
-            //check for doublr step
-            if (!occupiedAt1 && pawnPackage.doubleForward.length > 0) {
-                let occupiedAt2 = false;
-                for (let i = 0; i < _package.friendly.length; i++) {
-                    if (
-                        _package.friendly[i].x === pawnPackage.doubleForward[0].x &&
-                        _package.friendly[i].y === pawnPackage.doubleForward[0].y
-                    ) {
-                        occupiedAt2 = true;
-                        break;
-                    }
-                }
-                if (!occupiedAt2) {
-                    for (let i=0; i < _package.enemy.length; i++) {
-                        if (
-                            _package.enemy[i].x === pawnPackage.doubleForward[0].x &&
-                            _package.enemy[i].y === pawnPackage.doubleForward[0].y
-                        ) {
-                            occupiedAt2 = true;
-                            break;
-                        }
-                    }
-                }
-                if (!occupiedAt2) {positions.push(pawnPackage.doubleForward[0]);}
-            }
         }
-        if (pawnPackage.captures.length > 0){
-            //check if either diagonal has enemy
-            for (let j=0; j < pawnPackage.captures.length; j++) {
 
-                for (let i=0; i < _package.enemy.length; i++) {
-
-                    if (
-                        pawnPackage.captures[j].x===_package.enemy[i].x &&
-                        pawnPackage.captures[j].y===_package.enemy[i].y
-                    ) {
-                        positions.push(pawnPackage.captures[j]);
-                        break;
-                    }
-                }
-            }
-        }
-        
-        return positions;
+        return unitsThreateningPosition;
     }
+
+    //filter 9
+    public whichUnitsMovesBlocksKingCheck(turn:Colour, 
+        unitsThreateningKing:PositionPackage[], friendlyPositions:PositionPackage[]):PositionPackage[]{
+        
+        const unitsThatCanBlock: PositionPackage[] = [];
+
+        // Double check cannot be blocked.
+        if (unitsThreateningKing.length !== 1) {return unitsThatCanBlock;}
+
+        const king = this.gameState.getUnitByPieceType("king", turn);
+
+        if (!king) {throw new Error(`${turn} king not found`);}
+
+        const checker = unitsThreateningKing[0].unit;
+
+        // Only sliding pieces can be blocked.
+        if (
+            checker.pieceType !== "rook" &&
+            checker.pieceType !== "bishop" &&
+            checker.pieceType !== "queen"
+        ) {return unitsThatCanBlock;}
+
+        const dx = Math.sign(king.position.x - checker.position.x);
+        const dy = Math.sign(king.position.y - checker.position.y);
+
+        const blockingPositions: Position[] = [];
+
+        let x = checker.position.x + dx;
+        let y = checker.position.y + dy;
+
+        while (
+            x !== king.position.x ||
+            y !== king.position.y
+        ) {
+            blockingPositions.push({ x, y });
+
+            x += dx;
+            y += dy;
+        }
+
+        for (let i = 0; i < friendlyPositions.length; i++) {
+
+            const friendlyPackage = friendlyPositions[i];
+
+            // King is handled separately.
+            if (friendlyPackage.unit.pieceType === "king") {continue;}
+
+            const validBlockingPositions: Position[] = [];
+
+            for (let j = 0; j < friendlyPackage.positions.length; j++) {
+
+                const position = friendlyPackage.positions[j];
+
+                for (let k = 0; k < blockingPositions.length; k++) {
+
+                    if (
+                        position.x === blockingPositions[k].x &&
+                        position.y === blockingPositions[k].y
+                    ) {
+                        validBlockingPositions.push(position);
+                        break;
+                    }
+                }
+            }
+
+            if (validBlockingPositions.length > 0) {
+                unitsThatCanBlock.push(
+                    new PositionPackage(
+                        friendlyPackage.unit,
+                        validBlockingPositions
+                    )
+                );
+            }
+        }
+
+        return unitsThatCanBlock;
+    }
+
+    public filterKingPositions(positions: Position[],enemyPositions:PositionPackage[]):
+    Position[] {
+        const safePositions: Position[] = [];
+
+        for (let i = 0; i < positions.length; i++) {
+
+            const threats =
+                this.whichPiecesThreateningPosition(
+                    positions[i],
+                    enemyPositions
+                );
+
+            if (threats.length === 0) {
+                safePositions.push(positions[i]);
+            }
+        }
+
+        return safePositions;
+    }
+
+    public whichUnitsCanCaptureAttackingUnit(
+    threateningPieces: PositionPackage[],
+    friendlyPositions: PositionPackage[]
+    ): PositionPackage[] {
+
+        const attackers: PositionPackage[] = [];
+
+        for (let i = 0; i < friendlyPositions.length; i++) {
+
+            const friendlyUnit = friendlyPositions[i];
+
+            for (let j = 0; j < threateningPieces.length; j++) {
+
+                const checkerPosition =
+                    threateningPieces[j].unit.position;
+
+                for (let k = 0; k < friendlyUnit.positions.length; k++) {
+
+                    if (
+                        friendlyUnit.positions[k].x === checkerPosition.x &&
+                        friendlyUnit.positions[k].y === checkerPosition.y
+                    ) {
+                        attackers.push(friendlyUnit);
+                        break;
+                    }
+                }
+
+                //this unit already proved it can capture a checker
+                if (attackers.includes(friendlyUnit)) {
+                    break;
+                }
+            }
+        }
+
+        return attackers;
+    }
+    //this syntax positioning pmo
+    public filterCapturePositions(
+        positions:Position[],
+        threateningPieces:PositionPackage[]
+    ):Position[]{
+        const capturePositions:Position[] = [];
+
+        for (let i =0; i < threateningPieces.length; i++){
+            const checkerPos = threateningPieces[i].unit.position;
+            for (let j = 0; j < positions.length; j++){
+                if (
+                    positions[j].x === checkerPos.x &&
+                    positions[j].y === checkerPos.y
+                ){capturePositions.push(positions[j]);}
+            }
+        }
+
+        return capturePositions;
+    }
+   
 }
