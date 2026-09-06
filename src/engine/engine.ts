@@ -376,7 +376,7 @@ export class Engine {
 
         const allowedPositions: Position[] = [];
 
-        // Add this unit's checker-capture positions.
+        //this unit's checker-capture positions is added
         for (let i = 0; i < captureOptions.length; i++) {
             if (captureOptions[i].unit === unit) {
                 allowedPositions.push(
@@ -385,7 +385,7 @@ export class Engine {
             }
         }
 
-        // Add this unit's blocking positions.
+        //this unit's blocking positions is added
         for (let i = 0; i < blockOptions.length; i++) {
             if (blockOptions[i].unit === unit) {
                 allowedPositions.push(
