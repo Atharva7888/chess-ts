@@ -238,6 +238,7 @@ export class Unit{
     public colour: Colour;
     public movements: Movement[] = [];
     public pieceType:PieceType;
+    public hasMoved:boolean = false;
 
     constructor(position: Position, colour: Colour, pieceType:PieceType){
         this.position = position;

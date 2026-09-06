@@ -4,6 +4,9 @@ import {
     type Position,
     Unit,
     type Colour,
+    HorizontalMovement,
+    VerticalMovement,
+    DiagonalMovement,
 } from "../data/data";
 import {
     GameState
@@ -12,6 +15,12 @@ import {
     filter
 } from "./filters";
 
+
+type GameStatus = 
+    |"playing"
+    |"check"
+    |"checkmate"
+    |"stalemate"
 
 export class OccupancyPackage {
     public empty: Position[] = [];
@@ -48,6 +57,7 @@ export class Engine {
     private currentSelectedUnit: Unit | undefined = undefined;
     private hasSelected: boolean = false;
     private possiblePositions: Position[] = [];
+    private gameStatus:GameStatus = "playing";
     public isKingChecked = false;
 
     public getSelectedUnit(): Unit | undefined {return this.currentSelectedUnit;}
@@ -106,26 +116,13 @@ export class Engine {
     //this function checks if the given unit can be selected validly
     private canSelectUnit(unit: Unit): boolean {
 
-        //jmp to validate unit to check if the unit selected is valid according to turn
-        if (!this.validateUnit(unit)) {return false;}
+        if (!this.validateUnit(unit)) {
+            return false;
+        }
 
-        //if king is not checked------------------------------------------------------
-        //if player's king is not checked then return true, unit can be selected 
-        if (!this.isKingChecked) {return true;}
+        const legalPositions =this.generateLegalPositions(unit);
 
-        //if king is checked-----------------------------------------------------------
-        //verify only king can be selected or else return false
-        //since king is allowed to move during check
-        if (unit.pieceType === "king") {return true;}
-        
-        //if an other unit can kill the checker, then allow it to be selected during check
-        if (this.canUnitCaptureChecker(unit)) {return true;}
-
-        //if an other unit can block the checker's path, allow it to be selected
-        if (this.canUnitBlockChecker(unit)) {return true;}
-
-        //else return false by default
-        return false;
+        return legalPositions.length > 0;
     }
 
     //this is like a setter function
@@ -163,7 +160,23 @@ export class Engine {
             return false;
         }
 
-        this.gameState.moveUnit(this.currentSelectedUnit!.position,pos);
+        const unit = this.currentSelectedUnit!;
+
+        if (
+            unit.pieceType === "king" &&
+            Math.abs(pos.x - unit.position.x) === 2
+        ) {
+            const kingside = pos.x > unit.position.x;
+
+            this.performCastling(unit, kingside);
+        } else {
+            this.gameState.moveUnit(
+                unit.position,
+                pos
+            );
+
+            unit.hasMoved = true;
+        }
 
         this.finishMove();
 
@@ -207,7 +220,25 @@ export class Engine {
         }
 
         this.gameState.removeUnitAt(pos);
-        this.gameState.moveUnit(this.currentSelectedUnit!.position,pos);
+        
+        const unit = this.currentSelectedUnit!;
+
+        if (
+            unit.pieceType === "king" &&
+            Math.abs(pos.x - unit.position.x) === 2
+        ) {
+            const kingside = pos.x > unit.position.x;
+
+            this.performCastling(unit, kingside);
+        } else {
+            this.gameState.moveUnit(
+                unit.position,
+                pos
+            );
+
+            unit.hasMoved = true;
+        }
+
         this.finishMove();
 
         return true;
@@ -215,6 +246,7 @@ export class Engine {
 
     private finishMove(): void {
 
+        this.checkPromotion();
         this.ClearSelection();
 
         if (this.Turn === "white") {
@@ -224,6 +256,9 @@ export class Engine {
         }
 
         this.updateKingCheck();
+
+        this.updateGameStatus();
+        console.log("Game status:", this.gameStatus);
     }
 
     //generates all the possible positions ignoring every lawas
@@ -253,6 +288,34 @@ export class Engine {
 
         return legalPositions;
 
+    }
+
+    public generateAttackPositions(unit:Unit){
+        if (unit.pieceType==="pawn"){
+            return this.generatePawnAttackPositions(unit);
+        }
+        if (unit.pieceType==="king"){
+            return this.generateKingAttackPositions(unit);
+        }
+        return this.generatePossiblePositions(unit);
+    }
+
+    private generatePawnAttackPositions(unit:Unit):Position[]{
+        const attacks:Position[] = [];
+        const direction = unit.colour === "white"? 1: -1;
+        const leftAttackPOs = {
+            x:unit.position.x - 1,
+            y:unit.position.y + direction
+        };
+
+        const rightAttackPos = {
+            x:unit.position.x+1,
+            y:unit.position.y + direction
+        };
+
+        attacks.push(leftAttackPOs);
+        attacks.push(rightAttackPos);
+        return attacks;
     }
 
     private returnPossiblePositions(unit: Unit): Position[] {
@@ -308,20 +371,57 @@ export class Engine {
         return positionPackages;
     }
 
+    private generateTeamAttackPositions(colour:Colour):PositionPackage[]{
+        
+        const positionPackages:PositionPackage[] = [];
+        const units = this.gameState.getUnits();
+
+        for (let i=0; i < units.length; i++){
+            const unit = units[i];
+
+            if (unit.colour !== colour){continue;}
+
+            const positions = this.generateAttackPositions(unit);
+            const pack = new PositionPackage(unit, positions);
+            positionPackages.push(pack);
+        }
+        return positionPackages;
+    }
+
+    private generateKingAttackPositions(unit:Unit):Position[]{
+        const attacks:Position[] = [];
+
+        const directions = [
+            { x: -1, y: -1 },
+            { x:  0, y: -1 },
+            { x:  1, y: -1 },
+            { x: -1, y:  0 },
+            { x:  1, y:  0 },
+            { x: -1, y:  1 },
+            { x:  0, y:  1 },
+            { x:  1, y:  1 }
+        ];
+
+        for (let i = 0; i < directions.length; i++){
+            attacks.push({
+                x:unit.position.x + directions[i].x,
+                y:unit.position.y + directions[i].y
+            });
+        }
+
+        return attacks;
+    }
+
     public updateKingCheck(): void {
 
         const enemyColour: Colour = this.Turn === "white" ? "black" : "white";
 
-        const enemyPositions = this.generateTeamPositions(enemyColour);
+        const enemyPositions = this.generateTeamAttackPositions(enemyColour);
 
         this.isKingChecked =this._filter.isKingCheck(this.Turn,enemyPositions);
         console.log("KIng checked", this.isKingChecked);
-
-        if (this.isKingChecked){
-            const unitsCanCapture = this.getUnitsCanCaptureChecker();
-            console.log("Units that can capture: ", unitsCanCapture);
-        }
     }
+
 
     public getPiecesThreatingKing():PositionPackage[]{
         const enemyColour:Colour = this.Turn === "white"? "black":"white";
@@ -330,108 +430,254 @@ export class Engine {
         return this._filter.whichPiecesThreateningKing(this.Turn, enemyPositions)
     }
 
-    //get the units that can kill checker guy
-    public getUnitsCanCaptureChecker():PositionPackage[]{
-        const enemyColour: Colour =
-        this.Turn === "white" ? "black" : "white";
-
-        const enemyPositions = this.generateTeamPositions(enemyColour);
-
-
-        const threateningPieces = this._filter.whichPiecesThreateningKing(
-                this.Turn,
-                enemyPositions
-            );
-
-        const friendlyPositions =this.generateTeamPositions(this.Turn);
-
-        const unitsCanCapture =this._filter.whichUnitsCanCaptureAttackingUnit(
-                threateningPieces,
-                friendlyPositions
-            );
-
-        return unitsCanCapture;
-    }
-
     private generateSelectionPositions(unit: Unit): Position[] {
        
-        let positions = this.generatePossiblePositions(unit);
+        const positions =this.generateLegalPositions(unit);
 
-        if (!this.isKingChecked) {return positions;}
-
-        const enemyColour: Colour =unit.colour === "white" ? "black" : "white";
-
-        const enemyPositions = this.generateTeamPositions(enemyColour);
-
-        if (unit.pieceType === "king") {
-            return this._filter.filterKingPositions(
-                positions,
-                enemyPositions
-            );
-        }
-
-        const captureOptions = this.getUnitsCanCaptureChecker();
-
-        const blockOptions = this.getUnitsCanBlockChecker();
-
-        const allowedPositions: Position[] = [];
-
-        //this unit's checker-capture positions is added
-        for (let i = 0; i < captureOptions.length; i++) {
-            if (captureOptions[i].unit === unit) {
-                allowedPositions.push(
-                    ...captureOptions[i].positions
-                );
-            }
-        }
-
-        //this unit's blocking positions is added
-        for (let i = 0; i < blockOptions.length; i++) {
-            if (blockOptions[i].unit === unit) {
-                allowedPositions.push(
-                    ...blockOptions[i].positions
-                );
-            }
-        }
-
-        return allowedPositions;
-    }
-
-    private canUnitCaptureChecker(unit:Unit):boolean{
-        
-       const unitsCanCapture = this.getUnitsCanCaptureChecker();
-
-        for (let i = 0; i < unitsCanCapture.length; i++) {
-            if (unitsCanCapture[i].unit === unit) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    public getUnitsCanBlockChecker(): PositionPackage[] {
-        const threateningPieces =this.getPiecesThreatingKing();
-
-        const friendlyPositions = this.generateTeamPositions(this.Turn);
-
-        return this._filter.whichUnitsMovesBlocksKingCheck(
-            this.Turn,
-            threateningPieces,
-            friendlyPositions
+        console.log(
+            "Legal positions:",
+            unit,
+            positions
         );
+
+        return positions;
     }
 
-    private canUnitBlockChecker(unit: Unit): boolean {
+    private isMoveLegal(unit:Unit, destination:Position):boolean{
+        
+        const originalPos = {x:unit.position.x, y:unit.position.y};
 
-        const unitsCanBlock =this.getUnitsCanBlockChecker();
+        const capturedUnit = this.gameState.getUnitAt(destination);
 
-        for (let i = 0; i < unitsCanBlock.length; i++) {
-            if (unitsCanBlock[i].unit === unit) {return true;}
+        //we need to remove captured pieces temp
+        if (capturedUnit && capturedUnit.pieceType==="king"){return false;}
+
+        //temporarily make the move
+        unit.position = destination;
+        const enemyColour: Colour = unit.colour === "white" ? "black" : "white";
+        const enemyPositions =this.generateTeamAttackPositions(enemyColour);
+
+        const kingIsAttacked = this._filter.isKingCheck(unit.colour, enemyPositions);
+
+        //restore original pos
+        unit.position = originalPos;
+
+        //restore capture position
+        if (capturedUnit){this.gameState.addUnit(capturedUnit);}
+
+        return !kingIsAttacked;
+    }
+
+    private generateLegalPositions(unit:Unit):Position[]{
+        
+        const candidatePOsitions = this.generatePossiblePositions(unit);
+
+        if (unit.pieceType === "king"){
+            if (this.canCastle(unit, true)){
+                candidatePOsitions.push({
+                    x:6,
+                    y:unit.position.y
+                });
+            }
+            if (this.canCastle(unit, false)){
+                candidatePOsitions.push({
+                    x:2,
+                    y:unit.position.y
+                });
+            }
+        }
+
+        const legalPositions:Position[] = [];
+
+        for (let i=0; i < candidatePOsitions.length; i++){
+            if (this.isMoveLegal(unit, candidatePOsitions[i])){
+                legalPositions.push(candidatePOsitions[i]);
+            }
+        }
+        return legalPositions;
+    }
+
+    private hasAnyLegalMove(colour:Colour):boolean{
+        const units =this.gameState.getUnits();
+
+        for (let i = 0; i < units.length; i++) {
+
+            const unit = units[i];
+
+            if (unit.colour !== colour) {continue;}
+
+            const legalPositions =this.generateLegalPositions(unit);
+
+            if (legalPositions.length > 0) {return true;}
         }
 
         return false;
     }
+
+    private isKingAttacked(colour: Colour): boolean {
+
+        const enemyColour: Colour =colour === "white" ? "black" : "white";
+
+        const enemyPositions =this.generateTeamAttackPositions(enemyColour);
+
+        return this._filter.isKingCheck(colour,enemyPositions);
+    }
+
+    private updateGameStatus(): void {
+
+        const colour = this.Turn;
+
+        if (this.isCheckmate(colour)) {this.gameStatus = "checkmate"; return;}
+        if (this.isStalemate(colour)) {this.gameStatus = "stalemate"; return;}
+        if (this.isKingAttacked(colour)) {this.gameStatus = "check"; return;}
+
+        this.gameStatus = "playing";
+    }
+
+    private checkPromotion(): void {
+        const unit = this.currentSelectedUnit;
+
+        if (!unit) {
+            return;
+        }
+
+        if (unit.pieceType !== "pawn") {
+            return;
+        }
+
+        if ((unit.colour === "white" && unit.position.y === 7) ||
+            (unit.colour === "black" && unit.position.y === 0)) {
+            this.promoteToQueen(unit);
+        }
+    }
+
+    private promoteToQueen(unit:Unit):boolean{
+        if (unit.pieceType !== "pawn"){return false;}
         
+        const queen = new Unit(unit.position,unit.colour,"queen");
+        queen.movements.push(new HorizontalMovement(), new VerticalMovement(), 
+        new DiagonalMovement());
+
+        this.gameState.replaceUnit(unit, queen);
+        return true;
+    }
+
+    private getCastlingRook(king: Unit,kingside: boolean): Unit | undefined {
+
+        const y = king.position.y;
+
+        const rookX = kingside ? 7 : 0;
+
+        const rook = this.gameState.getUnitAt({x: rookX,y: y});
+
+        if (!rook) {return undefined;}
+
+        if (rook.colour !== king.colour) {return undefined;}
+
+        if (rook.pieceType !== "rook") {return undefined;}
+
+        return rook;
+    }
+
+    private canCastle(king: Unit,kingside: boolean): boolean {
+
+        if (king.hasMoved) {return false;}
+
+        const rook = this.getCastlingRook(king,kingside);
+
+        if (!rook) {return false;}
+
+        if (rook.hasMoved) {return false;}
+
+        if (!this.areCastlingSquaresEmpty(king, kingside)){return false;}
+
+        //king cannot castle while currently check
+        if (this.isKingAttacked(king.colour)){return false;}
+
+        const y = king.position.y;
+
+        const transitionPos = {
+            x:kingside?5:3,
+            y:y
+        };
+
+        const destinationPos = {
+            x:kingside?6:2,
+            y: y
+        };
+
+        //king cannot pass during check
+        if (this.isPositionAttacked(transitionPos, king.colour)){return false;}
+        if (this.isPositionAttacked(destinationPos, king.colour)){return false;}
+
+        return true;
+    }
+
+    private isPositionAttacked(position: Position,colour: Colour): boolean {
+
+        const enemyColour: Colour =colour === "white" ? "black" : "white";
+
+        const enemyPackages =this.generateTeamAttackPositions(enemyColour);
+
+        for (const pack of enemyPackages) {
+            for (const attackedPosition of pack.positions) {
+
+                if (
+                    attackedPosition.x === position.x &&
+                    attackedPosition.y === position.y
+                ) {return true;}
+            }
+        }
+
+        return false;
+    }
+
+    private areCastlingSquaresEmpty(king: Unit,kingside: boolean): boolean {
+
+        const y = king.position.y;
+
+        if (kingside) {
+            const f = this.gameState.getUnitAt({ x: 5, y: y });
+            const g = this.gameState.getUnitAt({ x: 6, y: y });
+            return !f && !g;
+        }
+
+        const b = this.gameState.getUnitAt({ x: 1, y: y });
+        const c = this.gameState.getUnitAt({ x: 2, y: y });
+        const d = this.gameState.getUnitAt({ x: 3, y: y });
+
+        return !b && !c && !d;
+    }
+
+    private performCastling(king: Unit, kingside: boolean): void {
+    const rook = this.getCastlingRook(king, kingside);
+
+        if (!rook) {return;}
+
+        const y = king.position.y;
+
+        const kingDestination: Position = {x: kingside ? 6:2,y: y};
+
+        const rookDestination: Position = {x: kingside ? 5 : 3,y: y};
+
+        this.gameState.moveUnit(king.position,kingDestination);
+
+        this.gameState.moveUnit(rook.position,rookDestination);
+
+        king.hasMoved = true;
+        rook.hasMoved = true;
+    }
+    
+    private isCheckmate(colour:Colour){
+        if (!this.isKingAttacked(colour)){return false;}
+
+        return !this.hasAnyLegalMove(colour);
+    }
+
+    private isStalemate(colour:Colour){
+        if (this.isKingAttacked(colour)){return false;}
+
+        return !this.hasAnyLegalMove(colour);
+    }
     
 }

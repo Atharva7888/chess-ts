@@ -99,6 +99,17 @@ export class GameState{
         );
     }
 
+    public addUnit(unit: Unit): void {this.unitState.push(unit);}
+
+    public replaceUnit(oldUnit: Unit, newUnit: Unit): void {
+
+        const oldUnitIndex = this.unitState.indexOf(oldUnit);
+
+        if (oldUnitIndex === -1) {return;}
+
+        this.unitState.splice(oldUnitIndex, 1, newUnit);
+    }
+
 
 }
 
